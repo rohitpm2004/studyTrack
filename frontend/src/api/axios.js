@@ -1,5 +1,5 @@
 import axios from "axios";
-
+let baseURL="https://studytrack-n18i.onrender.com/"
 const API = axios.create({ baseURL: import.meta.env.VITE_API_URL || "/api" });
 
 // attach JWT on every request
