@@ -5,8 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:5000',
-      '/uploads': 'http://localhost:5000',
+      '/api': 'https://studytrack-n18i.onrender.com',
+      '/uploads': 'https://studytrack-n18i.onrender.com',
     },
   },
 })
