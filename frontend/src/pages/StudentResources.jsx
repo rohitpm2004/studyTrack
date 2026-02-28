@@ -13,9 +13,22 @@ export default function StudentResources() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("All");
 
-  // Open Access: Filter by Choice
-  const [selectedDept, setSelectedDept] = useState(user?.department || "Computer Science");
-  const [selectedSem, setSelectedSem] = useState(user?.semester || 1);
+  // Open Access: Filter by Choice (defaults to localStorage, then user profile)
+  const [selectedDept, setSelectedDept] = useState(() => {
+    return localStorage.getItem("student_dept") || user?.department || "Computer Science";
+  });
+  const [selectedSem, setSelectedSem] = useState(() => {
+    return Number(localStorage.getItem("student_sem")) || user?.semester || 1;
+  });
+
+  // Sync to localStorage
+  useEffect(() => {
+    localStorage.setItem("student_dept", selectedDept);
+  }, [selectedDept]);
+
+  useEffect(() => {
+    localStorage.setItem("student_sem", selectedSem);
+  }, [selectedSem]);
 
   useEffect(() => {
     setLoading(true);
