@@ -327,7 +327,7 @@ export const exportClicksCSV = async (req, res) => {
     }
 
     for (const s of Object.values(studentClicks)) {
-      csv += `"${video.title}","${s.name}","${s.email}","${s.dept}","${s.group}","${s.college}","${new Date(s.lastClick).toLocaleString()}",${s.count}\n`;
+      csv += `"${video.title}","${s.name}","${s.email}","${s.dept}","${s.group}","${s.college}","${new Date(s.lastClick).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}",${s.count}\n`;
     }
 
     res.setHeader("Content-Type", "text/csv");
@@ -398,7 +398,7 @@ export const exportAllClicksCSV = async (req, res) => {
       const totalClicks = videoEntries.reduce((sum, v) => sum + v.count, 0);
       const mostRecentClick = new Date(Math.max(...videoEntries.map((v) => new Date(v.lastClick))));
 
-      csv += `"${s.name}","${s.email}","${s.dept}","${s.group}","${s.college}","${videoNames}",${totalClicks},"${mostRecentClick.toLocaleString()}",${totalVideos}\n`;
+      csv += `"${s.name}","${s.email}","${s.dept}","${s.group}","${s.college}","${videoNames}",${totalClicks},"${mostRecentClick.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}",${totalVideos}\n`;
     }
 
     res.setHeader("Content-Type", "text/csv");
