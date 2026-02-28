@@ -203,14 +203,14 @@ export default function VideoPlayer({ mode = "student" }) {
   }, [video, isTeacher, videoSource]);
 
   const sendHeartbeat = useCallback(async () => {
-    deltaRef.current = 10;
-    setSessionTime(prev => prev + 10);
+    deltaRef.current = 30;
+    setSessionTime(prev => prev + 30);
     await sendHeartbeatNow();
   }, [sendHeartbeatNow]);
 
   useEffect(() => {
     if (playing && !isTeacher) {
-      intervalRef.current = setInterval(sendHeartbeat, 10_000);
+      intervalRef.current = setInterval(sendHeartbeat, 30_000);
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
     }

@@ -17,7 +17,7 @@ export const updateProgress = async (req, res) => {
     const isDrive = video.videoSource === "drive";
     let progress = await Progress.findOne({ studentId, videoId });
 
-    const safeDelta = Math.max(0, Math.min(delta || 0, 15));
+    const safeDelta = Math.max(0, Math.min(delta || 0, 35));
     const pos = Math.max(0, lastPosition || 0);
 
     if (!progress) {
@@ -75,7 +75,7 @@ export const getMyProgress = async (req, res) => {
 /* ===================== GET ALL MY PROGRESS (Student Dashboard) ===================== */
 export const getAllMyProgress = async (req, res) => {
   try {
-    const progressList = await Progress.find({ studentId: req.user._id });
+    const progressList = await Progress.find({ studentId: req.user._id }).lean();
     res.json(progressList);
   } catch (err) {
     res.status(500).json({ msg: err.message });
@@ -89,13 +89,13 @@ export const getVideoAnalytics = async (req, res) => {
       return res.status(403).json({ msg: "Teachers only" });
 
     const { videoId } = req.params;
-    const video = await Video.findById(videoId);
+    const video = await Video.findById(videoId).lean();
     if (!video) return res.status(404).json({ msg: "Video not found" });
 
     const progressList = await Progress.find({ videoId }).populate(
       "studentId",
       "name email group collegeName role department"
-    );
+    ).lean();
 
     const isDrive = video.videoSource === "drive";
 
@@ -131,13 +131,13 @@ export const getClassroomAnalytics = async (req, res) => {
       return res.status(403).json({ msg: "Teachers only" });
 
     // get all videos by this teacher
-    const videos = await Video.find({ teacherId: req.user._id });
+    const videos = await Video.find({ teacherId: req.user._id }).lean();
     const videoIds = videos.map((v) => v._id);
 
     const progressList = await Progress.find({ videoId: { $in: videoIds } }).populate(
       "studentId",
       "name email group collegeName role department"
-    );
+    ).lean();
 
     // group by student (exclude teachers)
     const studentMap = {};
@@ -185,13 +185,13 @@ export const exportCSV = async (req, res) => {
       return res.status(403).json({ msg: "Teachers only" });
 
     const { videoId } = req.params;
-    const video = await Video.findById(videoId);
+    const video = await Video.findById(videoId).lean();
     if (!video) return res.status(404).json({ msg: "Video not found" });
 
     const progressList = await Progress.find({ videoId }).populate(
       "studentId",
       "name email group collegeName role department"
-    );
+    ).lean();
 
     let csv = "Name,Email,Dept,Group,College,Watch Time (s),Completion %,Completed\n";
 
@@ -226,12 +226,13 @@ export const exportClassroomCSV = async (req, res) => {
     if (req.user.role !== "teacher")
       return res.status(403).json({ msg: "Teachers only" });
 
-    const videos = await Video.find({ teacherId: req.user._id });
+    const videos = await Video.find({ teacherId: req.user._id }).lean();
     const videoIds = videos.map((v) => v._id);
 
     const progressList = await Progress.find({ videoId: { $in: videoIds } })
       .populate("studentId", "name email group role department collegeName")
-      .populate("videoId", "title");
+      .populate("videoId", "title")
+      .lean();
 
     const studentMap = {};
     for (const p of progressList) {
@@ -295,12 +296,13 @@ export const exportClicksCSV = async (req, res) => {
       return res.status(403).json({ msg: "Teachers only" });
 
     const { videoId } = req.params;
-    const video = await Video.findById(videoId);
+    const video = await Video.findById(videoId).lean();
     if (!video) return res.status(404).json({ msg: "Video not found" });
 
     const clicks = await VideoClick.find({ videoId })
       .populate("studentId", "name email group collegeName department role")
-      .sort({ clickedAt: -1 });
+      .sort({ clickedAt: -1 })
+      .lean();
 
     let csv = "Video Name,Name,Email,Dept,Group,College,Clicked At,Total Clicks\n";
 
@@ -345,7 +347,7 @@ export const exportAllClicksCSV = async (req, res) => {
       return res.status(403).json({ msg: "Teachers only" });
 
     // Get all videos by this teacher
-    const videos = await Video.find({ teacherId: req.user._id });
+    const videos = await Video.find({ teacherId: req.user._id }).lean();
     const videoIds = videos.map((v) => v._id);
     const videoMap = {};
     videos.forEach((v) => { videoMap[v._id.toString()] = v.title; });
@@ -353,7 +355,8 @@ export const exportAllClicksCSV = async (req, res) => {
     // Get all clicks across all teacher's videos
     const clicks = await VideoClick.find({ videoId: { $in: videoIds } })
       .populate("studentId", "name email group collegeName department role")
-      .sort({ clickedAt: -1 });
+      .sort({ clickedAt: -1 })
+      .lean();
 
     // Group by student → video
     const studentMap = {};
