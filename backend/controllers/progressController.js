@@ -386,14 +386,19 @@ export const exportAllClicksCSV = async (req, res) => {
       }
     }
 
-    let csv = "Name,Email,Dept,Group,College,Video Name,Clicks on Video,Last Clicked,Total Videos Clicked\n";
+    let csv = "Name,Email,Dept,Group,College,Video Names,Total Clicks,Most Recent Click,Total Videos Clicked\n";
 
     for (const s of Object.values(studentMap)) {
       const videoEntries = Object.values(s.videos);
       const totalVideos = videoEntries.length;
-      for (const v of videoEntries) {
-        csv += `"${s.name}","${s.email}","${s.dept}","${s.group}","${s.college}","${v.title}",${v.count},"${new Date(v.lastClick).toLocaleString()}",${totalVideos}\n`;
-      }
+
+      if (totalVideos === 0) continue;
+
+      const videoNames = videoEntries.map((v) => v.title).join(", ");
+      const totalClicks = videoEntries.reduce((sum, v) => sum + v.count, 0);
+      const mostRecentClick = new Date(Math.max(...videoEntries.map((v) => new Date(v.lastClick))));
+
+      csv += `"${s.name}","${s.email}","${s.dept}","${s.group}","${s.college}","${videoNames}",${totalClicks},"${mostRecentClick.toLocaleString()}",${totalVideos}\n`;
     }
 
     res.setHeader("Content-Type", "text/csv");
