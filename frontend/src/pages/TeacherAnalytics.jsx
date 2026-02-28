@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import API from "../api/axios";
-import { BarChart3, Download, Users, Clock, CheckCircle, GraduationCap } from "lucide-react";
+import { BarChart3, Download, Users, Clock, CheckCircle, GraduationCap, MousePointerClick } from "lucide-react";
 
 export default function TeacherAnalytics() {
   const { user } = useAuth();
@@ -64,6 +64,23 @@ export default function TeacherAnalytics() {
     }
   };
 
+  const handleExportClicksCSV = async () => {
+    if (!selectedVideo) return;
+    try {
+      const res = await API.get(`/progress/export-clicks-csv/${selectedVideo}`, {
+        responseType: "blob",
+      });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${videoInfo?.title || "video"}-clicks.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      alert("Export failed");
+    }
+  };
+
   const handleExportClassroomCSV = async () => {
     try {
       const res = await API.get("/progress/export-classroom-csv", {
@@ -73,6 +90,22 @@ export default function TeacherAnalytics() {
       const a = document.createElement("a");
       a.href = url;
       a.download = `Classroom-Overview.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      alert("Export failed");
+    }
+  };
+
+  const handleExportAllClicksCSV = async () => {
+    try {
+      const res = await API.get("/progress/export-all-clicks-csv", {
+        responseType: "blob",
+      });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `All-Videos-Clicks.csv`;
       a.click();
       window.URL.revokeObjectURL(url);
     } catch {
@@ -209,9 +242,14 @@ export default function TeacherAnalytics() {
           </div>
           <div className="toolbar-right">
             {tab === "classroom" && classroom.length > 0 && (
-              <button className="btn btn-outline btn-sm" onClick={handleExportClassroomCSV}>
-                <Download size={16} /> Export CSV
-              </button>
+              <>
+                <button className="btn btn-outline btn-sm" onClick={handleExportAllClicksCSV}>
+                  <MousePointerClick size={16} /> Export All Clicks
+                </button>
+                <button className="btn btn-outline btn-sm" onClick={handleExportClassroomCSV}>
+                  <Download size={16} /> Export CSV
+                </button>
+              </>
             )}
             {tab === "students" && enrolledStudents.length > 0 && (
               <button className="btn btn-outline btn-sm" onClick={handleExportStudentsCSV}>
@@ -293,9 +331,14 @@ export default function TeacherAnalytics() {
               </div>
               <div className="toolbar-right">
                 {selectedVideo && (
-                  <button className="btn btn-success btn-sm" onClick={handleExportCSV}>
-                    <Download size={16} /> Export CSV
-                  </button>
+                  <>
+                    <button className="btn btn-outline btn-sm" onClick={handleExportClicksCSV}>
+                      <MousePointerClick size={16} /> Export Clicks CSV
+                    </button>
+                    <button className="btn btn-success btn-sm" onClick={handleExportCSV}>
+                      <Download size={16} /> Export CSV
+                    </button>
+                  </>
                 )}
               </div>
             </div>

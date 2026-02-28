@@ -1,28 +1,33 @@
 import Video from "../models/Video.js";
 
-/* ---- YouTube URL validation ---- */
-const YT_REGEX =
-  /(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/;
+/* ---- Support for YouTube and Google Drive ---- */
+const YT_REGEX = /(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/;
+const DRIVE_REGEX = /(?:drive\.google\.com\/(?:file\/d\/|open\?id=)|docs\.google\.com\/file\/d\/)([a-zA-Z0-9_-]+)/;
 
-function isValidYouTubeUrl(url) {
-  return url && YT_REGEX.test(url);
+function getVideoSource(url) {
+  if (YT_REGEX.test(url)) return "youtube";
+  if (DRIVE_REGEX.test(url)) return "drive";
+  return null;
 }
 
 /* ===================== CREATE VIDEO (Teacher) ===================== */
 export const createVideo = async (req, res) => {
   try {
-    const { title, youtubeUrl, description, duration, department, semester, subject } = req.body;
+    const { title, youtubeUrl, videoUrl, description, duration, department, semester, subject } = req.body;
+    const finalUrl = videoUrl || youtubeUrl;
 
-    if (!title || !youtubeUrl || !department || !semester || !subject)
-      return res.status(400).json({ msg: "Required fields: title, youtubeUrl, department, semester, subject" });
+    if (!title || !finalUrl || !department || !semester || !subject)
+      return res.status(400).json({ msg: "Required fields: title, videoUrl, department, semester, subject" });
 
-    if (!isValidYouTubeUrl(youtubeUrl))
-      return res.status(400).json({ msg: "Valid YouTube URL is required (youtube.com or youtu.be)" });
+    const source = getVideoSource(finalUrl);
+    if (!source)
+      return res.status(400).json({ msg: "Invalid video URL. Only YouTube and Google Drive links are supported." });
 
     const video = await Video.create({
       title,
       description: description || "",
-      youtubeUrl,
+      videoUrl: finalUrl,
+      videoSource: source,
       department,
       semester: Number(semester) || 1,
       subject,
@@ -44,8 +49,6 @@ export const getVideos = async (req, res) => {
     if (req.user.role === "teacher") {
       filter.teacherId = req.user._id;
     } else {
-      // Students: Filter by department and semester from query params
-      // Defaults to user's own if not specified
       const dept = req.query.department || req.user.department;
       const sem = req.query.semester || req.user.semester;
       
@@ -82,13 +85,18 @@ export const updateVideo = async (req, res) => {
     if (video.teacherId.toString() !== req.user._id.toString())
       return res.status(403).json({ msg: "Not your video" });
 
-    const { title, youtubeUrl, description, duration, department, semester, subject } = req.body;
+    const { title, youtubeUrl, videoUrl, description, duration, department, semester, subject } = req.body;
+    const finalUrl = videoUrl || youtubeUrl;
 
-    if (youtubeUrl && !isValidYouTubeUrl(youtubeUrl))
-      return res.status(400).json({ msg: "Valid YouTube URL is required (youtube.com or youtu.be)" });
+    if (finalUrl !== undefined) {
+      const source = getVideoSource(finalUrl);
+      if (!source)
+        return res.status(400).json({ msg: "Invalid video URL. Only YouTube and Google Drive links are supported." });
+      video.videoUrl = finalUrl;
+      video.videoSource = source;
+    }
 
     if (title !== undefined) video.title = title;
-    if (youtubeUrl !== undefined) video.youtubeUrl = youtubeUrl;
     if (description !== undefined) video.description = description;
     if (duration !== undefined) video.duration = Number(duration) || 0;
     if (department !== undefined) video.department = department;
@@ -101,6 +109,7 @@ export const updateVideo = async (req, res) => {
     res.status(500).json({ msg: err.message });
   }
 };
+
 
 /* ===================== DELETE VIDEO (Teacher) ===================== */
 export const deleteVideo = async (req, res) => {

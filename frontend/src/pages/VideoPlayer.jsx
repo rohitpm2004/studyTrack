@@ -15,13 +15,16 @@ import {
   ChevronRight 
 } from "lucide-react";
 
-/* Extract YouTube video ID from any common URL format */
-function getYouTubeId(url) {
-  if (!url) return null;
-  const m = url.match(
-    /(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/
-  );
-  return m ? m[1] : null;
+/* Extract Video Info */
+function getVideoInfo(url) {
+  if (!url) return { id: null, type: null };
+  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/);
+  if (ytMatch) return { id: ytMatch[1], type: "youtube" };
+  
+  const driveMatch = url.match(/(?:drive\.google\.com\/(?:file\/d\/|open\?id=)|docs\.google\.com\/file\/d\/)([a-zA-Z0-9_-]+)/);
+  if (driveMatch) return { id: driveMatch[1], type: "drive" };
+
+  return { id: null, type: null };
 }
 
 /* Load the YouTube IFrame API script (once) */
@@ -55,6 +58,7 @@ export default function VideoPlayer({ mode = "student" }) {
   const [progress, setProgress] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [seeked, setSeeked] = useState(false);
+  const [videoSource, setVideoSource] = useState({ id: null, type: null });
 
   // Features State
   const [activeTab, setActiveTab] = useState("discussion");
@@ -64,19 +68,27 @@ export default function VideoPlayer({ mode = "student" }) {
   const [noteText, setNoteText] = useState("");
   const [loadingFeatures, setLoadingFeatures] = useState(true);
 
-  const watchRef = useRef(0);
+  const deltaRef = useRef(0);
   const intervalRef = useRef(null);
+  const clickRecordedRef = useRef(false);
+  const [sessionTime, setSessionTime] = useState(0);
 
   /* ---- Load Data ---- */
   const loadVideoData = useCallback(async () => {
     try {
       const vRes = await API.get(`/videos/${id}`);
       setVideo(vRes.data);
+      setVideoSource(getVideoInfo(vRes.data.videoUrl || vRes.data.youtubeUrl));
 
       if (!isTeacher) {
         const pRes = await API.get(`/progress/me/${id}`);
         setProgress(pRes.data);
-        watchRef.current = pRes.data.watchTime || 0;
+
+        // Record video click (only once per page load)
+        if (!clickRecordedRef.current) {
+          clickRecordedRef.current = true;
+          API.post("/progress/click", { videoId: id }).catch(() => {});
+        }
       }
     } catch (err) {
       console.error(err);
@@ -109,71 +121,90 @@ export default function VideoPlayer({ mode = "student" }) {
 
   /* ---- Player Creation ---- */
   useEffect(() => {
-    if (!video) return;
-    const ytId = getYouTubeId(video.youtubeUrl);
-    if (!ytId) return;
+    if (!video || !videoSource.id) return;
 
-    let destroyed = false;
-
-    loadYTApi().then(() => {
-      if (destroyed) return;
-      playerRef.current = new window.YT.Player(containerRef.current, {
-        videoId: ytId,
-        width: "100%",
-        height: "100%",
-        playerVars: {
-          autoplay: 0,
-          modestbranding: 1,
-          rel: 0,
-        },
-        events: {
-          onReady: (e) => {
-            if (progress?.lastPosition > 0 && !seeked) {
-              e.target.seekTo(progress.lastPosition, true);
-              setSeeked(true);
-            }
+    if (videoSource.type === "youtube") {
+      let destroyed = false;
+      loadYTApi().then(() => {
+        if (destroyed) return;
+        playerRef.current = new window.YT.Player(containerRef.current, {
+          videoId: videoSource.id,
+          width: "100%",
+          height: "100%",
+          playerVars: {
+            autoplay: 0,
+            modestbranding: 1,
+            rel: 0,
           },
-          onStateChange: (e) => {
-            const state = e.data;
-            if (state === 1) setPlaying(true);
-            else if (state === 2 || state === 0) {
-              setPlaying(false);
-              sendHeartbeatNow();
-            }
+          events: {
+            onReady: (e) => {
+              if (progress?.lastPosition > 0 && !seeked) {
+                e.target.seekTo(progress.lastPosition, true);
+                setSeeked(true);
+              }
+            },
+            onStateChange: (e) => {
+              const state = e.data;
+              if (state === 1) setPlaying(true);
+              else if (state === 2 || state === 0) {
+                setPlaying(false);
+                sendHeartbeatNow();
+              }
+            },
           },
-        },
+        });
       });
-    });
 
-    return () => {
-      destroyed = true;
-      if (playerRef.current?.destroy) {
-        try { playerRef.current.destroy(); } catch { /* ignore */ }
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [video]);
+      return () => {
+        destroyed = true;
+        if (playerRef.current?.destroy) {
+          try { playerRef.current.destroy(); } catch { /* ignore */ }
+        }
+      };
+    } else if (videoSource.type === "drive") {
+      // For Google Drive, we start in PAUSED state.
+      // It will toggle to "Tracking" as soon as the student clicks the video to play it.
+      setPlaying(false);
+      return () => setPlaying(false);
+    }
+  }, [video, videoSource]);
+
+
+
+
 
   /* ---- Handlers ---- */
-  const sendHeartbeatNow = useCallback(async () => {
+  const sendHeartbeatNow = useCallback(async (secondsToSend) => {
     const player = playerRef.current;
-    if (!player?.getCurrentTime || !video || isTeacher) return;
-    const currentTime = player.getCurrentTime() || 0;
+    if (!video || isTeacher) return;
+    
+    let currentTime = 0;
+    if (videoSource.type === "youtube") {
+      if (!player?.getCurrentTime) return;
+      currentTime = player.getCurrentTime() || 0;
+    } else {
+      // For Drive, we just track watch time, we don't have precise current position
+      currentTime = 0; 
+    }
+
+    const delta = secondsToSend ?? deltaRef.current;
+    deltaRef.current = 0; // reset after capturing
 
     try {
       const { data } = await API.post("/progress/update", {
         videoId: video._id,
         lastPosition: Math.floor(currentTime),
-        watchTime: watchRef.current,
+        delta,
       });
       setProgress(data);
     } catch (err) {
       console.error("Heartbeat error:", err);
     }
-  }, [video, isTeacher]);
+  }, [video, isTeacher, videoSource]);
 
   const sendHeartbeat = useCallback(async () => {
-    watchRef.current += 10;
+    deltaRef.current = 10;
+    setSessionTime(prev => prev + 10);
     await sendHeartbeatNow();
   }, [sendHeartbeatNow]);
 
@@ -187,6 +218,57 @@ export default function VideoPlayer({ mode = "student" }) {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [playing, isTeacher, sendHeartbeat]);
+
+  /* Smart Tracking for Google Drive: Auto-pause when tab is inactive */
+  const wasPlayingRef = useRef(false);
+  const playingRef = useRef(playing);
+  
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+
+  useEffect(() => {
+    if (videoSource.type !== "drive" || isTeacher) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (playingRef.current) {
+          wasPlayingRef.current = true;
+          setPlaying(false);
+        } else {
+          wasPlayingRef.current = false;
+        }
+      } else {
+        // Tab became visible again
+        if (wasPlayingRef.current) {
+          setPlaying(true);
+        }
+      }
+    };
+
+    const handleWindowBlur = () => {
+      if (document.hidden) return;
+
+      setTimeout(() => {
+        if (document.activeElement?.tagName === "IFRAME") {
+          setPlaying(prev => !prev);
+          window.focus();
+        }
+      }, 150);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleWindowBlur);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [videoSource, isTeacher]);
+
+
+
+
 
   const handleAddComment = async (e) => {
     e.preventDefault();
@@ -267,12 +349,16 @@ export default function VideoPlayer({ mode = "student" }) {
       </div>
     );
 
-  const pct = video.duration > 0 ? Math.min(100, Math.round(((progress?.watchTime || 0) / video.duration) * 100)) : 0;
+  // YouTube: use maxPosition (furthest point); Drive: use watchTime (capped at duration on backend)
+  const progressMetric = videoSource.type === "drive"
+    ? (progress?.watchTime || 0)
+    : (progress?.maxPosition || 0);
+  const pct = video.duration > 0 ? Math.min(100, Math.round((progressMetric / video.duration) * 100)) : 0;
 
   return (
     <>
       <div className="page-header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div className="header-content">
           <div>
             <button
               className="btn btn-outline btn-sm"
@@ -284,19 +370,8 @@ export default function VideoPlayer({ mode = "student" }) {
             <h2>{video.title}</h2>
             <p>{video.description || "No description"}</p>
           </div>
-          <div style={{ textAlign: "right", marginTop: 40 }}>
-            <div style={{ 
-              fontSize: "0.85rem", 
-              fontWeight: 700, 
-              color: "var(--primary)", 
-              background: "var(--primary-light)", 
-              padding: "8px 20px", 
-              borderRadius: "100px",
-              border: "1px solid var(--primary-glow)",
-              boxShadow: "var(--shadow-sm)"
-            }}>
-              {user?.department}
-            </div>
+          <div className="profile-badge" style={{ marginTop: 40 }}>
+            {user?.department}
           </div>
         </div>
       </div>
@@ -306,16 +381,34 @@ export default function VideoPlayer({ mode = "student" }) {
           {/* Main Content: Player + Stats */}
           <div className="player-main">
             <div className="player-wrapper">
-              <div
-                ref={containerRef}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  height: "100%",
-                }}
-              />
+              {videoSource.type === "youtube" ? (
+                <div
+                  ref={containerRef}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: "100%",
+                  }}
+                />
+              ) : videoSource.type === "drive" ? (
+                <iframe
+                  src={`https://drive.google.com/file/d/${videoSource.id}/preview`}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: "100%",
+                    border: "none"
+                  }}
+                  allow="autoplay"
+                  title={video.title}
+                />
+              ) : (
+                <div className="empty-state">Unsupported Video Source</div>
+              )}
             </div>
 
             <div className="player-info" style={{ marginTop: 24 }}>
@@ -334,13 +427,18 @@ export default function VideoPlayer({ mode = "student" }) {
               <div className="player-status">
                 <span className="player-meta-item">
                   {playing ? <Pause size={16} /> : <Play size={16} />}
-                  {playing ? "Playing" : "Paused"}
+                  {playing ? (videoSource.type === "drive" ? "Auto-tracking active..." : "Playing") : (videoSource.type === "drive" ? "Auto-tracking paused" : "Paused")}
                 </span>
+
+
+
+
+
 
                 {!isTeacher && (
                   <span className="player-meta-item">
                     <Clock size={16} />
-                    Watch time: {formatTime(progress?.watchTime || 0)}
+                    Watch time: {formatTime(sessionTime)}
                   </span>
                 )}
 

@@ -7,5 +7,5 @@ export const DEPARTMENTS = [
   "English Department",
   "Sanskrit Department",
   "Chemistry Department",
-  "barabari department",
+  "barabari Department",
 ];

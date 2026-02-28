@@ -78,28 +78,18 @@ export default function StudentDashboard() {
   return (
     <>
       <div className="page-header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 20 }}>
+        <div className="header-content">
           <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 2 }}>
+            <div className="header-title-row">
               <h2 style={{ margin: 0 }}>Explore Lectures</h2>
-              <div style={{ 
-                fontSize: "0.72rem", 
-                fontWeight: 700, 
-                color: "var(--primary)", 
-                background: "var(--primary-light)", 
-                padding: "4px 12px", 
-                borderRadius: "100px",
-                border: "1px solid var(--primary-glow)",
-                textTransform: "uppercase",
-                letterSpacing: "0.5px"
-              }}>
+              <div className="profile-badge">
                 My Profile: {user?.department}
               </div>
             </div>
             <p>Viewing <strong>{selectedDept}</strong> • Semester <strong>{selectedSem}</strong></p>
           </div>
 
-          <div style={{ display: "flex", gap: 10 }}>
+          <div className="header-actions">
             <select 
               className="header-select" 
               value={selectedDept}

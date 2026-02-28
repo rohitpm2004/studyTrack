@@ -1,36 +1,54 @@
 import Progress from "../models/Progress.js";
 import Video from "../models/Video.js";
 import User from "../models/User.js";
+import VideoClick from "../models/VideoClick.js";
 
 /* ===================== HEARTBEAT — Update Progress ===================== */
 export const updateProgress = async (req, res) => {
   try {
-    const { videoId, lastPosition, watchTime } = req.body;
+    const { videoId, lastPosition, delta } = req.body;
     const studentId = req.user._id;
 
     if (!videoId) return res.status(400).json({ msg: "videoId is required" });
 
-    // find the video to get duration for completion check
     const video = await Video.findById(videoId);
     if (!video) return res.status(404).json({ msg: "Video not found" });
 
-    const isCompleted =
-      video.duration > 0 && watchTime >= video.duration * 0.9;
-
+    const isDrive = video.videoSource === "drive";
     let progress = await Progress.findOne({ studentId, videoId });
+
+    const safeDelta = Math.max(0, Math.min(delta || 0, 15));
+    const pos = Math.max(0, lastPosition || 0);
 
     if (!progress) {
       progress = await Progress.create({
         studentId,
         videoId,
-        watchTime: watchTime || 0,
-        lastPosition: lastPosition || 0,
-        isCompleted,
+        watchTime: safeDelta,
+        lastPosition: pos,
+        maxPosition: pos,
+        isCompleted: false,
       });
     } else {
-      progress.watchTime = Math.max(progress.watchTime, watchTime || 0);
-      progress.lastPosition = lastPosition || 0;
-      if (isCompleted) progress.isCompleted = true;
+      progress.watchTime += safeDelta;
+      // For Drive: cap watchTime at video duration (can't exceed 100%)
+      if (isDrive && video.duration > 0) {
+        progress.watchTime = Math.min(progress.watchTime, video.duration);
+      }
+      progress.lastPosition = pos;
+      // Only move maxPosition forward (YouTube sends real position; Drive sends 0)
+      if (pos > progress.maxPosition) {
+        progress.maxPosition = pos;
+      }
+      await progress.save();
+    }
+
+    // Completion check:
+    // YouTube → use maxPosition (furthest point reached)
+    // Drive   → use watchTime (total time, capped at duration)
+    const progressMetric = isDrive ? progress.watchTime : progress.maxPosition;
+    if (video.duration > 0 && progressMetric >= video.duration * 0.9) {
+      progress.isCompleted = true;
       await progress.save();
     }
 
@@ -79,21 +97,26 @@ export const getVideoAnalytics = async (req, res) => {
       "name email group collegeName role department"
     );
 
+    const isDrive = video.videoSource === "drive";
+
     const analytics = progressList
       .filter((p) => p.studentId?.role === "student")
-      .map((p) => ({
+      .map((p) => {
+      const metric = isDrive ? p.watchTime : (p.maxPosition || 0);
+      return {
       studentName: p.studentId?.name || "Unknown",
       studentEmail: p.studentId?.email || "",
       group: p.studentId?.group || "",
       collegeName: p.studentId?.collegeName || "",
       department: p.studentId?.department || "",
       watchTime: p.watchTime,
+      maxPosition: p.maxPosition || 0,
       completionPercent:
         video.duration > 0
-          ? Math.min(100, Math.round((p.watchTime / video.duration) * 100))
+          ? Math.min(100, Math.round((metric / video.duration) * 100))
           : 0,
       isCompleted: p.isCompleted,
-    }));
+    }});
 
     res.json({ video: { title: video.title, duration: video.duration }, analytics });
   } catch (err) {
@@ -172,11 +195,13 @@ export const exportCSV = async (req, res) => {
 
     let csv = "Name,Email,Dept,Group,College,Watch Time (s),Completion %,Completed\n";
 
+    const isDriveV = video.videoSource === "drive";
     for (const p of progressList) {
       if (p.studentId?.role !== "student") continue;
+      const metric = isDriveV ? p.watchTime : (p.maxPosition || 0);
       const pct =
         video.duration > 0
-          ? Math.min(100, Math.round((p.watchTime / video.duration) * 100))
+          ? Math.min(100, Math.round((metric / video.duration) * 100))
           : 0;
       csv += `"${p.studentId?.name || ""}","${p.studentId?.email || ""}","${
         p.studentId?.department || ""
@@ -240,6 +265,139 @@ export const exportClassroomCSV = async (req, res) => {
 
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", `attachment; filename="Classroom-Overview.csv"`);
+    res.send(csv);
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+};
+
+/* ===================== STUDENT: Record Video Click ===================== */
+export const recordVideoClick = async (req, res) => {
+  try {
+    const { videoId } = req.body;
+    if (!videoId) return res.status(400).json({ msg: "videoId is required" });
+
+    const click = await VideoClick.create({
+      studentId: req.user._id,
+      videoId,
+    });
+    res.status(201).json(click);
+  } catch (err) {
+    console.error("Video click record error:", err);
+    res.status(500).json({ msg: "Failed to record click" });
+  }
+};
+
+/* ===================== TEACHER: Export Video Clicks CSV ===================== */
+export const exportClicksCSV = async (req, res) => {
+  try {
+    if (req.user.role !== "teacher")
+      return res.status(403).json({ msg: "Teachers only" });
+
+    const { videoId } = req.params;
+    const video = await Video.findById(videoId);
+    if (!video) return res.status(404).json({ msg: "Video not found" });
+
+    const clicks = await VideoClick.find({ videoId })
+      .populate("studentId", "name email group collegeName department role")
+      .sort({ clickedAt: -1 });
+
+    let csv = "Video Name,Name,Email,Dept,Group,College,Clicked At,Total Clicks\n";
+
+    // Group clicks by student to show total clicks per student
+    const studentClicks = {};
+    for (const c of clicks) {
+      if (c.studentId?.role !== "student") continue;
+      const sid = c.studentId._id.toString();
+      if (!studentClicks[sid]) {
+        studentClicks[sid] = {
+          name: c.studentId.name || "",
+          email: c.studentId.email || "",
+          dept: c.studentId.department || "",
+          group: c.studentId.group || "",
+          college: c.studentId.collegeName || "",
+          firstClick: c.clickedAt,
+          lastClick: c.clickedAt,
+          count: 0,
+        };
+      }
+      studentClicks[sid].count += 1;
+      if (c.clickedAt < studentClicks[sid].firstClick) studentClicks[sid].firstClick = c.clickedAt;
+      if (c.clickedAt > studentClicks[sid].lastClick) studentClicks[sid].lastClick = c.clickedAt;
+    }
+
+    for (const s of Object.values(studentClicks)) {
+      csv += `"${video.title}","${s.name}","${s.email}","${s.dept}","${s.group}","${s.college}","${new Date(s.lastClick).toLocaleString()}",${s.count}\n`;
+    }
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="${video.title}-clicks.csv"`);
+    res.send(csv);
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+};
+
+/* ===================== TEACHER: Export ALL Videos Clicks CSV ===================== */
+export const exportAllClicksCSV = async (req, res) => {
+  try {
+    if (req.user.role !== "teacher")
+      return res.status(403).json({ msg: "Teachers only" });
+
+    // Get all videos by this teacher
+    const videos = await Video.find({ teacherId: req.user._id });
+    const videoIds = videos.map((v) => v._id);
+    const videoMap = {};
+    videos.forEach((v) => { videoMap[v._id.toString()] = v.title; });
+
+    // Get all clicks across all teacher's videos
+    const clicks = await VideoClick.find({ videoId: { $in: videoIds } })
+      .populate("studentId", "name email group collegeName department role")
+      .sort({ clickedAt: -1 });
+
+    // Group by student → video
+    const studentMap = {};
+    for (const c of clicks) {
+      if (c.studentId?.role !== "student") continue;
+      const sid = c.studentId._id.toString();
+      const vid = c.videoId.toString();
+
+      if (!studentMap[sid]) {
+        studentMap[sid] = {
+          name: c.studentId.name || "",
+          email: c.studentId.email || "",
+          dept: c.studentId.department || "",
+          group: c.studentId.group || "",
+          college: c.studentId.collegeName || "",
+          videos: {},  // videoId -> { title, count, lastClick }
+        };
+      }
+
+      if (!studentMap[sid].videos[vid]) {
+        studentMap[sid].videos[vid] = {
+          title: videoMap[vid] || "Unknown",
+          count: 0,
+          lastClick: c.clickedAt,
+        };
+      }
+      studentMap[sid].videos[vid].count += 1;
+      if (c.clickedAt > studentMap[sid].videos[vid].lastClick) {
+        studentMap[sid].videos[vid].lastClick = c.clickedAt;
+      }
+    }
+
+    let csv = "Name,Email,Dept,Group,College,Video Name,Clicks on Video,Last Clicked,Total Videos Clicked\n";
+
+    for (const s of Object.values(studentMap)) {
+      const videoEntries = Object.values(s.videos);
+      const totalVideos = videoEntries.length;
+      for (const v of videoEntries) {
+        csv += `"${s.name}","${s.email}","${s.dept}","${s.group}","${s.college}","${v.title}",${v.count},"${new Date(v.lastClick).toLocaleString()}",${totalVideos}\n`;
+      }
+    }
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="All-Videos-Clicks.csv"`);
     res.send(csv);
   } catch (err) {
     res.status(500).json({ msg: err.message });

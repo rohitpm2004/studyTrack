@@ -5,10 +5,16 @@ import { useAuth } from "../context/AuthContext";
 import { Plus, Trash2, Video as VideoIcon, Users, Clock, X, Link as LinkIcon, Play, Copy, Check, Pencil } from "lucide-react";
 import { DEPARTMENTS } from "../constants";
 
-/* Helper: extract YouTube video ID for thumbnail */
-function getYouTubeId(url) {
-  const m = url?.match(/(?:youtu\.be\/|v=|\/embed\/|\/v\/)([a-zA-Z0-9_-]{11})/);
-  return m ? m[1] : null;
+/* Helper: extract Video ID */
+function getVideoId(url) {
+  if (!url) return { id: null, type: null };
+  const ytMatch = url.match(/(?:youtu\.be\/|v=|\/embed\/|\/v\/)([a-zA-Z0-9_-]{11})/);
+  if (ytMatch) return { id: ytMatch[1], type: "youtube" };
+  
+  const driveMatch = url.match(/(?:drive\.google\.com\/(?:file\/d\/|open\?id=)|docs\.google\.com\/file\/d\/)([a-zA-Z0-9_-]+)/);
+  if (driveMatch) return { id: driveMatch[1], type: "drive" };
+
+  return { id: null, type: null };
 }
 
 const EMPTY_FORM = { 
@@ -127,24 +133,13 @@ export default function TeacherDashboard() {
   return (
     <>
       <div className="page-header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div className="header-content">
           <div>
             <h2>Teacher Dashboard</h2>
             <p>Manage lectures and track student engagement</p>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ 
-              fontSize: "0.85rem", 
-              fontWeight: 700, 
-              color: "var(--primary)", 
-              background: "var(--primary-light)", 
-              padding: "8px 20px", 
-              borderRadius: "100px",
-              border: "1px solid var(--primary-glow)",
-              boxShadow: "var(--shadow-sm)"
-            }}>
-              {user?.department}
-            </div>
+          <div className="profile-badge">
+            {user?.department}
           </div>
         </div>
       </div>
@@ -244,7 +239,7 @@ export default function TeacherDashboard() {
                 <div className="form-group">
                   <label className="form-label">Semester</label>
                   <select className="form-input" value={form.semester} onChange={set("semester")} required>
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map(s => (
+                    {[1, 2, 3, 4, 5, 6].map(s => (
                       <option key={s} value={s}>Semester {s}</option>
                     ))}
                   </select>
@@ -262,7 +257,7 @@ export default function TeacherDashboard() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">YouTube URL</label>
+                <label className="form-label">Video URL (YouTube or Google Drive)</label>
                 <div style={{ position: "relative" }}>
                   <LinkIcon
                     size={18}
@@ -270,14 +265,18 @@ export default function TeacherDashboard() {
                   />
                   <input
                     className="form-input"
-                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholder="YouTube link or Google Drive link..."
                     value={form.youtubeUrl}
                     onChange={set("youtubeUrl")}
                     required
                     style={{ paddingLeft: 42 }}
                   />
                 </div>
+                <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
+                  Supported: <code>youtube.com</code>, <code>youtu.be</code>, <code>drive.google.com</code>
+                </p>
               </div>
+
 
               <div className="form-group">
                 <label className="form-label">Description</label>
@@ -305,11 +304,19 @@ export default function TeacherDashboard() {
         ) : (
           <div className="video-grid">
             {videos.map((v) => {
-              const ytId = getYouTubeId(v.youtubeUrl);
+              const { id, type } = getVideoId(v.videoUrl || v.youtubeUrl);
               return (
                 <div key={v._id} className="video-card" style={{ cursor: "default" }}>
                   <div className="video-card-thumb">
-                    {ytId && <img src={`https://img.youtube.com/vi/${ytId}/hqdefault.jpg`} alt={v.title} />}
+                    {type === "youtube" && id && <img src={`https://img.youtube.com/vi/${id}/hqdefault.jpg`} alt={v.title} />}
+                    {type === "drive" && id && (
+                      <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#f0fdf4", color: "#16a34a" }}>
+                        <div style={{ textAlign: "center" }}>
+                          <VideoIcon size={32} />
+                          <div style={{ fontSize: "0.7rem", marginTop: 4, fontWeight: 600 }}>Google Drive Video</div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="video-card-body">
                     <div className="video-card-title">{v.title}</div>
